@@ -1,6 +1,6 @@
 {
   "name": "hytale-name",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Hytale username availability checker with verbose output",
   "main": "index.js",
   "type": "module",
