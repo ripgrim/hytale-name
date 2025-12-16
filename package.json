@@ -1,0 +1,24 @@
+{
+  "name": "hytale-name",
+  "version": "2.0.0",
+  "description": "Hytale username availability checker with verbose output",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "hytale-name": "./index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "hytale",
+    "username",
+    "checker",
+    "availability"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "undici": "^6.0.0"
+  }
+}
