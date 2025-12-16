@@ -97,11 +97,13 @@ function printHelp() {
 ${c.bold}Hytale Username Checker${c.reset}
 
 ${c.bold}Usage:${c.reset}
-  hytale-name <list.txt>          Check usernames from file
-  hytale-name <username>          Check a single username
-  hytale-name <user1,user2,...>   Check multiple usernames (comma-separated)
-  hytale-name --retry             Retry failed usernames from errors.txt
-  hytale-name --retry --tag run2  Retry with custom output tag
+  hytale-name <list.txt>                    Check usernames from file
+  hytale-name <username>                     Check a single username
+  hytale-name <user1,user2,...>             Check multiple usernames (comma-separated)
+  hytale-name <user1 user2 ...>             Check multiple usernames (space-separated)
+  hytale-name ["user1","user2",...]          Check multiple usernames (JSON array)
+  hytale-name --retry                        Retry failed usernames from errors.txt
+  hytale-name --retry --tag run2             Retry with custom output tag
 
 ${c.bold}Options:${c.reset}
   -w, --workers N      Number of workers (default: 8)
