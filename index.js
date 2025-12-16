@@ -93,8 +93,8 @@ ${c.bold}Examples:${c.reset}
   hytale-name names.txt                    # Basic run (verbose by default)
   hytale-name coolname                     # Check single username (minimal output)
   hytale-name coolname -v                  # Check single username with verbose output
-  hytale-name balls,wiener,taint           # Check multiple usernames (minimal output)
-  hytale-name balls,wiener,taint -v         # Check multiple usernames with verbose output
+  hytale-name name,name1,name2           # Check multiple usernames (minimal output)
+  hytale-name name,name1,name2 -v         # Check multiple usernames with verbose output
   hytale-name names.txt -w 4 -c 100        # Custom parallelism
   hytale-name --retry                      # Retry all errors
   hytale-name --retry -w 2 -c 30           # Gentle retry
