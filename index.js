@@ -42,6 +42,7 @@ function fmtTime(ms) {
 
 function parseArgs(args) {
   const r = { list: null, workers: null, conc: null, verbose: null, append: false, retry: false, tag: null, from: null, start: null, sleep: null, local: false, batch: null };
+  const nonFlagArgs = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '-v' || a === '--verbose') r.verbose = true;
@@ -55,7 +56,14 @@ function parseArgs(args) {
     else if (a === '-f' || a === '--from') r.from = args[++i];
     else if (a === '--start') r.start = Number(args[++i]);
     else if (a === '-s' || a === '--sleep') r.sleep = Number(args[++i]);
-    else if (!r.list && !a.startsWith('-')) r.list = a;
+    else if (!a.startsWith('-')) nonFlagArgs.push(a);
+  }
+  // Join non-flag args in case PowerShell split comma-separated values
+  // If multiple args and none contain commas, join with commas (likely comma-separated usernames)
+  if (nonFlagArgs.length > 1 && !nonFlagArgs.some(arg => arg.includes(','))) {
+    r.list = nonFlagArgs.join(',');
+  } else if (nonFlagArgs.length > 0) {
+    r.list = nonFlagArgs[0];
   }
   return r;
 }
@@ -152,16 +160,23 @@ async function main() {
     fs.writeFileSync(inputPath, retryUsers.join('\n') + '\n');
     console.log(`${c.cyan}Retrying ${retryUsers.length} failed usernames from ${outputDir}...${c.reset}\n`);
   } else if (args.list) {
-    // Check if it contains commas (comma-separated usernames)
+    // Check if it contains commas (comma-separated usernames) - check this FIRST
     if (args.list.includes(',')) {
       // Split by commas and treat as multiple usernames
       const usernames = args.list.split(',').map(u => u.trim()).filter(Boolean);
       if (usernames.length > 0) {
-        // Create a temp file with all usernames
-        inputPath = path.join(CWD, '.multi-check-temp.txt');
-        fs.writeFileSync(inputPath, usernames.join('\n') + '\n');
-        outputDir = CWD;
-        isSingleUsername = true; // Use minimal output for comma-separated too
+        // Filter to only valid usernames (3-10 chars)
+        const validUsernames = usernames.filter(u => u.length >= MIN_LEN && u.length <= MAX_LEN);
+        if (validUsernames.length > 0) {
+          // Create a temp file with all usernames
+          inputPath = path.join(CWD, '.multi-check-temp.txt');
+          fs.writeFileSync(inputPath, validUsernames.join('\n') + '\n');
+          outputDir = CWD;
+          isSingleUsername = true; // Use minimal output for comma-separated too
+        } else {
+          console.error(`${c.red}No valid usernames (${MIN_LEN}-${MAX_LEN} chars) found in comma-separated list${c.reset}`);
+          process.exit(1);
+        }
       } else {
         console.error(`${c.red}No valid usernames found in comma-separated list${c.reset}`);
         process.exit(1);
@@ -180,12 +195,19 @@ async function main() {
         outputDir = CWD;
         isSingleUsername = true;
       } else {
-        // Resolve input path
-        inputPath = path.resolve(args.list);
-        
-        // If --local flag, use input file's directory for output
-        if (args.local) {
-          outputDir = path.dirname(inputPath);
+        // Resolve input path - check if file exists
+        const resolvedPath = path.resolve(args.list);
+        if (fs.existsSync(resolvedPath)) {
+          inputPath = resolvedPath;
+          // If --local flag, use input file's directory for output
+          if (args.local) {
+            outputDir = path.dirname(inputPath);
+          }
+        } else {
+          // File doesn't exist - could be a username or invalid input
+          console.error(`${c.red}File not found: ${resolvedPath}${c.reset}`);
+          console.error(`${c.dim}Tip: If checking a username, make sure it's 3-10 characters${c.reset}`);
+          process.exit(1);
         }
       }
     }
@@ -194,8 +216,14 @@ async function main() {
     process.exit(1);
   }
 
-  if (!fs.existsSync(inputPath)) {
-    console.error(`${c.red}File not found: ${inputPath}${c.reset}`);
+  // inputPath should be set by now - verify it exists
+  if (!inputPath || !fs.existsSync(inputPath)) {
+    // This shouldn't happen if logic above is correct, but provide helpful error
+    if (inputPath) {
+      console.error(`${c.red}File not found: ${inputPath}${c.reset}`);
+    } else {
+      console.error(`${c.red}No input specified${c.reset}`);
+    }
     process.exit(1);
   }
 
