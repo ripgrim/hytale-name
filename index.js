@@ -41,7 +41,7 @@ function fmtTime(ms) {
 }
 
 function parseArgs(args) {
-  const r = { list: null, workers: null, conc: null, verbose: true, append: false, retry: false, tag: null, from: null, start: null, sleep: null, local: false, batch: null };
+  const r = { list: null, workers: null, conc: null, verbose: null, append: false, retry: false, tag: null, from: null, start: null, sleep: null, local: false, batch: null };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '-v' || a === '--verbose') r.verbose = true;
@@ -73,7 +73,7 @@ ${c.bold}Usage:${c.reset}
 ${c.bold}Options:${c.reset}
   -w, --workers N      Number of workers (default: 8)
   -c, --concurrency N  Concurrent requests per worker (default: 200)
-  -v, --verbose        Show each result live (default: enabled)
+  -v, --verbose        Show detailed output (header, stats, etc.)
   -a, --append         Append to output files
   -r, --retry          Retry usernames from errors.txt (in same dir as wordlist or current dir)
   -l, --local          Output files in same directory as input wordlist
@@ -89,10 +89,11 @@ ${c.bold}Output:${c.reset}
   errors.txt      Failed checks (username + reason)
 
 ${c.bold}Examples:${c.reset}
-  hytale-name names.txt              # Basic run
-  hytale-name coolname               # Check single username
+  hytale-name names.txt              # Basic run (verbose by default)
+  hytale-name coolname                # Check single username (minimal output)
+  hytale-name coolname -v             # Check single username with verbose output
   hytale-name names.txt -w 4 -c 100  # Custom parallelism
-  hytale-name --retry                # Retry all errors
+  hytale-name --retry                 # Retry all errors
   hytale-name --retry -w 2 -c 30     # Gentle retry
   hytale-name list.txt -f grape -a   # Resume from "grape"
 `);
@@ -109,6 +110,7 @@ async function main() {
   let inputPath;
   let isRetryMode = args.retry;
   let outputDir = CWD; // Default output directory
+  let isSingleUsername = false; // Track if checking a single username
   
   if (isRetryMode) {
     // In retry mode, if a wordlist is provided, use its directory for errors.txt lookup
@@ -158,6 +160,7 @@ async function main() {
       inputPath = path.join(CWD, '.single-check-temp.txt');
       fs.writeFileSync(inputPath, potentialUsername + '\n');
       outputDir = CWD;
+      isSingleUsername = true;
     } else {
       // Resolve input path
       inputPath = path.resolve(args.list);
@@ -177,7 +180,9 @@ async function main() {
     process.exit(1);
   }
 
-  const verbose = args.verbose; // Always true by default, but keep for worker compatibility
+  // For single username, default to minimal output unless verbose flag is set
+  // For file-based checks, default to verbose output
+  const verbose = isSingleUsername ? (args.verbose || false) : (args.verbose !== false);
   const append = args.append || isRetryMode; // Always append on retry
   
   // Output files - use outputDir (either CWD or input file's directory)
@@ -226,19 +231,23 @@ async function main() {
   }
 
   const total = usernames.length;
-  console.log(`${c.bold}${c.cyan}━━━ Hytale Username Checker ━━━${c.reset}`);
-  console.log(`${c.dim}Total in file:${c.reset} ${c.bold}${totalBefore.toLocaleString()}${c.reset}${filtered ? ` ${c.dim}(${filtered} filtered)${c.reset}` : ''}`);
-  if (skipped > 0) {
-    console.log(`${c.dim}Resuming from:${c.reset} ${c.yellow}${args.from || `line ${args.start}`}${c.reset} ${c.dim}(skipped ${skipped.toLocaleString()})${c.reset}`);
+  
+  // Only show header info if verbose mode
+  if (verbose) {
+    console.log(`${c.bold}${c.cyan}━━━ Hytale Username Checker ━━━${c.reset}`);
+    console.log(`${c.dim}Total in file:${c.reset} ${c.bold}${totalBefore.toLocaleString()}${c.reset}${filtered ? ` ${c.dim}(${filtered} filtered)${c.reset}` : ''}`);
+    if (skipped > 0) {
+      console.log(`${c.dim}Resuming from:${c.reset} ${c.yellow}${args.from || `line ${args.start}`}${c.reset} ${c.dim}(skipped ${skipped.toLocaleString()})${c.reset}`);
+    }
+    console.log(`${c.dim}To check:${c.reset} ${c.bold}${total.toLocaleString()}${c.reset}`);
+    console.log(`${c.dim}Parallel:${c.reset} ${c.bold}${workers}${c.reset} workers × ${conc} = ${c.yellow}~${workers * conc}${c.reset}`);
+    if (args.sleep) {
+      console.log(`${c.dim}Sleep:${c.reset} ${c.yellow}${args.sleep}s${c.reset} between requests`);
+    }
+    const outputPath = args.local ? path.relative(CWD, outputDir) : path.relative(CWD, outputDir) || '.';
+    console.log(`${c.dim}Output:${c.reset} ${c.bold}${outputPath}/${tag}*.txt${c.reset}${append ? ` ${c.yellow}(append)${c.reset}` : ''}`);
+    console.log();
   }
-  console.log(`${c.dim}To check:${c.reset} ${c.bold}${total.toLocaleString()}${c.reset}`);
-  console.log(`${c.dim}Parallel:${c.reset} ${c.bold}${workers}${c.reset} workers × ${conc} = ${c.yellow}~${workers * conc}${c.reset}`);
-  if (args.sleep) {
-    console.log(`${c.dim}Sleep:${c.reset} ${c.yellow}${args.sleep}s${c.reset} between requests`);
-  }
-  const outputPath = args.local ? path.relative(CWD, outputDir) : path.relative(CWD, outputDir) || '.';
-  console.log(`${c.dim}Output:${c.reset} ${c.bold}${outputPath}/${tag}*.txt${c.reset}${append ? ` ${c.yellow}(append)${c.reset}` : ''}`);
-  console.log();
 
   const shards = shardArray(usernames, workers);
   let checked = 0, avail = 0, taken = 0, errs = 0, lastUser = '';
@@ -354,21 +363,24 @@ async function main() {
 
   const ms = Date.now() - start;
 
-  console.log(`\n\n${c.bold}${c.green}━━━ Complete ━━━${c.reset}`);
-  console.log(`${c.dim}Time:${c.reset} ${c.bold}${fmtTime(ms)}${c.reset} (${fmtRate((total/ms)*1000)}/s)`);
-  console.log(`${c.green}Available:${c.reset} ${c.bold}${avail}${c.reset}`);
-  console.log(`${c.red}Taken:${c.reset} ${c.bold}${taken}${c.reset}`);
-  
-  // Show remaining errors
-  if (isRetryMode) {
-    const remaining = newErrors.size;
-    if (remaining > 0) {
-      console.log(`${c.yellow}Still failing:${c.reset} ${c.bold}${remaining}${c.reset} → run ${c.cyan}hytale-name --retry${c.reset} again`);
-    } else {
-      console.log(`${c.green}All errors resolved!${c.reset} 🎉`);
+  // Only show summary if verbose mode
+  if (verbose) {
+    console.log(`\n\n${c.bold}${c.green}━━━ Complete ━━━${c.reset}`);
+    console.log(`${c.dim}Time:${c.reset} ${c.bold}${fmtTime(ms)}${c.reset} (${fmtRate((total/ms)*1000)}/s)`);
+    console.log(`${c.green}Available:${c.reset} ${c.bold}${avail}${c.reset}`);
+    console.log(`${c.red}Taken:${c.reset} ${c.bold}${taken}${c.reset}`);
+    
+    // Show remaining errors
+    if (isRetryMode) {
+      const remaining = newErrors.size;
+      if (remaining > 0) {
+        console.log(`${c.yellow}Still failing:${c.reset} ${c.bold}${remaining}${c.reset} → run ${c.cyan}hytale-name --retry${c.reset} again`);
+      } else {
+        console.log(`${c.green}All errors resolved!${c.reset} 🎉`);
+      }
+    } else if (errs > 0) {
+      console.log(`${c.yellow}Errors:${c.reset} ${c.bold}${errs}${c.reset} → run ${c.cyan}hytale-name --retry${c.reset}`);
     }
-  } else if (errs > 0) {
-    console.log(`${c.yellow}Errors:${c.reset} ${c.bold}${errs}${c.reset} → run ${c.cyan}hytale-name --retry${c.reset}`);
   }
 }
 
