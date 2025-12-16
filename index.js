@@ -67,6 +67,7 @@ ${c.bold}Hytale Username Checker${c.reset}
 ${c.bold}Usage:${c.reset}
   hytale-name <list.txt>          Check usernames from file
   hytale-name <username>          Check a single username
+  hytale-name <user1,user2,...>   Check multiple usernames (comma-separated)
   hytale-name --retry             Retry failed usernames from errors.txt
   hytale-name --retry --tag run2  Retry with custom output tag
 
@@ -89,13 +90,15 @@ ${c.bold}Output:${c.reset}
   errors.txt      Failed checks (username + reason)
 
 ${c.bold}Examples:${c.reset}
-  hytale-name names.txt              # Basic run (verbose by default)
-  hytale-name coolname                # Check single username (minimal output)
-  hytale-name coolname -v             # Check single username with verbose output
-  hytale-name names.txt -w 4 -c 100  # Custom parallelism
-  hytale-name --retry                 # Retry all errors
-  hytale-name --retry -w 2 -c 30     # Gentle retry
-  hytale-name list.txt -f grape -a   # Resume from "grape"
+  hytale-name names.txt                    # Basic run (verbose by default)
+  hytale-name coolname                     # Check single username (minimal output)
+  hytale-name coolname -v                  # Check single username with verbose output
+  hytale-name balls,wiener,taint           # Check multiple usernames (minimal output)
+  hytale-name balls,wiener,taint -v         # Check multiple usernames with verbose output
+  hytale-name names.txt -w 4 -c 100        # Custom parallelism
+  hytale-name --retry                      # Retry all errors
+  hytale-name --retry -w 2 -c 30           # Gentle retry
+  hytale-name list.txt -f grape -a         # Resume from "grape"
 `);
 }
 
@@ -149,25 +152,41 @@ async function main() {
     fs.writeFileSync(inputPath, retryUsers.join('\n') + '\n');
     console.log(`${c.cyan}Retrying ${retryUsers.length} failed usernames from ${outputDir}...${c.reset}\n`);
   } else if (args.list) {
-    // Check if it's a single username (not a file path)
-    const potentialUsername = args.list.trim();
-    const isValidUsername = potentialUsername.length >= MIN_LEN && potentialUsername.length <= MAX_LEN;
-    const looksLikeFile = args.list.includes(path.sep) || args.list.includes('.') || args.list.length > MAX_LEN;
-    
-    // If it looks like a valid username and not a file path, treat as single username
-    if (isValidUsername && !looksLikeFile && !fs.existsSync(path.resolve(args.list))) {
-      // Create a temp file with just this username
-      inputPath = path.join(CWD, '.single-check-temp.txt');
-      fs.writeFileSync(inputPath, potentialUsername + '\n');
-      outputDir = CWD;
-      isSingleUsername = true;
+    // Check if it contains commas (comma-separated usernames)
+    if (args.list.includes(',')) {
+      // Split by commas and treat as multiple usernames
+      const usernames = args.list.split(',').map(u => u.trim()).filter(Boolean);
+      if (usernames.length > 0) {
+        // Create a temp file with all usernames
+        inputPath = path.join(CWD, '.multi-check-temp.txt');
+        fs.writeFileSync(inputPath, usernames.join('\n') + '\n');
+        outputDir = CWD;
+        isSingleUsername = true; // Use minimal output for comma-separated too
+      } else {
+        console.error(`${c.red}No valid usernames found in comma-separated list${c.reset}`);
+        process.exit(1);
+      }
     } else {
-      // Resolve input path
-      inputPath = path.resolve(args.list);
+      // Check if it's a single username (not a file path)
+      const potentialUsername = args.list.trim();
+      const isValidUsername = potentialUsername.length >= MIN_LEN && potentialUsername.length <= MAX_LEN;
+      const looksLikeFile = args.list.includes(path.sep) || (args.list.includes('.') && !args.list.match(/^[a-zA-Z0-9_]+\./)) || args.list.length > MAX_LEN;
       
-      // If --local flag, use input file's directory for output
-      if (args.local) {
-        outputDir = path.dirname(inputPath);
+      // If it looks like a valid username and not a file path, treat as single username
+      if (isValidUsername && !looksLikeFile && !fs.existsSync(path.resolve(args.list))) {
+        // Create a temp file with just this username
+        inputPath = path.join(CWD, '.single-check-temp.txt');
+        fs.writeFileSync(inputPath, potentialUsername + '\n');
+        outputDir = CWD;
+        isSingleUsername = true;
+      } else {
+        // Resolve input path
+        inputPath = path.resolve(args.list);
+        
+        // If --local flag, use input file's directory for output
+        if (args.local) {
+          outputDir = path.dirname(inputPath);
+        }
       }
     }
   } else {
@@ -327,6 +346,7 @@ async function main() {
   // Clean up temp files
   try { fs.unlinkSync(path.join(outputDir, '.retry-temp.txt')); } catch {}
   try { fs.unlinkSync(path.join(CWD, '.single-check-temp.txt')); } catch {}
+  try { fs.unlinkSync(path.join(CWD, '.multi-check-temp.txt')); } catch {}
 
   // In retry mode, rewrite errors.txt with only unresolved usernames
   if (isRetryMode) {
