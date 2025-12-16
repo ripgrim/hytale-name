@@ -40,6 +40,33 @@ function fmtTime(ms) {
   return `${Math.floor(ms/60000)}m ${((ms%60000)/1000).toFixed(0)}s`;
 }
 
+function parseUsernames(input) {
+  // Try to parse as JSON array first
+  if (input.trim().startsWith('[') && input.trim().endsWith(']')) {
+    try {
+      const parsed = JSON.parse(input);
+      if (Array.isArray(parsed)) {
+        return parsed.map(u => String(u).trim()).filter(Boolean);
+      }
+    } catch (e) {
+      // Not valid JSON, continue with other parsing methods
+    }
+  }
+  
+  // Check for comma-separated
+  if (input.includes(',')) {
+    return input.split(',').map(u => u.trim()).filter(Boolean);
+  }
+  
+  // Check for space-separated (multiple spaces or tabs)
+  if (input.includes(' ') || input.includes('\t')) {
+    return input.split(/[\s\t]+/).map(u => u.trim()).filter(Boolean);
+  }
+  
+  // Single username
+  return [input.trim()].filter(Boolean);
+}
+
 function parseArgs(args) {
   const r = { list: null, workers: null, conc: null, verbose: null, append: false, retry: false, tag: null, from: null, start: null, sleep: null, local: false, batch: null };
   const nonFlagArgs = [];
@@ -58,12 +85,9 @@ function parseArgs(args) {
     else if (a === '-s' || a === '--sleep') r.sleep = Number(args[++i]);
     else if (!a.startsWith('-')) nonFlagArgs.push(a);
   }
-  // Join non-flag args in case PowerShell split comma-separated values
-  // If multiple args and none contain commas, join with commas (likely comma-separated usernames)
-  if (nonFlagArgs.length > 1 && !nonFlagArgs.some(arg => arg.includes(','))) {
-    r.list = nonFlagArgs.join(',');
-  } else if (nonFlagArgs.length > 0) {
-    r.list = nonFlagArgs[0];
+  // Join all non-flag args (handles space-separated, comma-separated, or array format)
+  if (nonFlagArgs.length > 0) {
+    r.list = nonFlagArgs.join(' ');
   }
   return r;
 }
@@ -160,30 +184,26 @@ async function main() {
     fs.writeFileSync(inputPath, retryUsers.join('\n') + '\n');
     console.log(`${c.cyan}Retrying ${retryUsers.length} failed usernames from ${outputDir}...${c.reset}\n`);
   } else if (args.list) {
-    // Check if it contains commas (comma-separated usernames) - check this FIRST
-    if (args.list.includes(',')) {
-      // Split by commas and treat as multiple usernames
-      const usernames = args.list.split(',').map(u => u.trim()).filter(Boolean);
-      if (usernames.length > 0) {
-        // Filter to only valid usernames (3-10 chars)
-        const validUsernames = usernames.filter(u => u.length >= MIN_LEN && u.length <= MAX_LEN);
-        if (validUsernames.length > 0) {
-          // Create a temp file with all usernames
-          inputPath = path.join(CWD, '.multi-check-temp.txt');
-          fs.writeFileSync(inputPath, validUsernames.join('\n') + '\n');
-          outputDir = CWD;
-          isSingleUsername = true; // Use minimal output for comma-separated too
-        } else {
-          console.error(`${c.red}No valid usernames (${MIN_LEN}-${MAX_LEN} chars) found in comma-separated list${c.reset}`);
-          process.exit(1);
-        }
+    // Try to parse as usernames (handles comma, space, or JSON array format)
+    const parsedUsernames = parseUsernames(args.list);
+    
+    // Check if we got multiple usernames or if it's a single username/file
+    if (parsedUsernames.length > 1) {
+      // Multiple usernames - filter to valid ones
+      const validUsernames = parsedUsernames.filter(u => u.length >= MIN_LEN && u.length <= MAX_LEN);
+      if (validUsernames.length > 0) {
+        // Create a temp file with all usernames
+        inputPath = path.join(CWD, '.multi-check-temp.txt');
+        fs.writeFileSync(inputPath, validUsernames.join('\n') + '\n');
+        outputDir = CWD;
+        isSingleUsername = true; // Use minimal output for multiple usernames
       } else {
-        console.error(`${c.red}No valid usernames found in comma-separated list${c.reset}`);
+        console.error(`${c.red}No valid usernames (${MIN_LEN}-${MAX_LEN} chars) found${c.reset}`);
         process.exit(1);
       }
-    } else {
-      // Check if it's a single username (not a file path)
-      const potentialUsername = args.list.trim();
+    } else if (parsedUsernames.length === 1) {
+      // Single username - check if it's a file or username
+      const potentialUsername = parsedUsernames[0];
       const isValidUsername = potentialUsername.length >= MIN_LEN && potentialUsername.length <= MAX_LEN;
       const looksLikeFile = args.list.includes(path.sep) || (args.list.includes('.') && !args.list.match(/^[a-zA-Z0-9_]+\./)) || args.list.length > MAX_LEN;
       
@@ -209,6 +229,18 @@ async function main() {
           console.error(`${c.dim}Tip: If checking a username, make sure it's 3-10 characters${c.reset}`);
           process.exit(1);
         }
+      }
+    } else {
+      // No usernames parsed - check if it's a file
+      const resolvedPath = path.resolve(args.list);
+      if (fs.existsSync(resolvedPath)) {
+        inputPath = resolvedPath;
+        if (args.local) {
+          outputDir = path.dirname(inputPath);
+        }
+      } else {
+        console.error(`${c.red}No valid usernames found and file not found: ${resolvedPath}${c.reset}`);
+        process.exit(1);
       }
     }
   } else {
